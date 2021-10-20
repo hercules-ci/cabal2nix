@@ -3,7 +3,7 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Cabal2nix
-  ( main, cabal2nix, cabal2nix', cabal2nixWithDB, parseArgs
+  ( main, cabal2nix, cabal2nix', cabal2nixWithDB, parseArgs, parseSinglePlatform
   , Options(..)
   )
   where
@@ -96,7 +96,7 @@ options = Options
           <*> switch (long "shell" <> help "generate output suitable for nix-shell")
           <*> many (strOption $ short 'f' <> long "flag" <> help "Cabal flag (may be specified multiple times)")
           <*> option parseCabal (long "compiler" <> help "compiler to use when evaluating the Cabal file" <> value buildCompilerId <> showDefaultWith prettyShow)
-          <*> option (maybeReader parsePlatform) (long "system" <> help "host system (in either short Nix format or full LLVM style) to use when evaluating the Cabal file" <> value buildPlatform <> showDefaultWith prettyShow)
+          <*> option (maybeReader parseSinglePlatform) (long "system" <> help "host system (in either short Nix format or full LLVM style) to use when evaluating the Cabal file" <> value buildPlatform <> showDefaultWith prettyShow)
           <*> optional (strOption $ long "subpath" <> metavar "PATH" <> help "Path to Cabal file's directory relative to the URI (default is root directory)")
           <*> optional (option utcTimeReader (long "hackage-snapshot" <> help "hackage snapshot time, ISO format"))
           <*> pure (\i -> Just (binding # (i, path # [ident # "pkgs", i])))
@@ -114,52 +114,15 @@ utcTimeReader = eitherReader $ \arg ->
 parseCabal :: Parsec a => ReadM a
 parseCabal = eitherReader eitherParsec
 
--- | Replicate the normalization performed by GHC_CONVERT_CPU in GHC's aclocal.m4
--- since the output of that is what Cabal parses.
-ghcConvertArch :: String -> String
-ghcConvertArch arch = case arch of
-  "i486"  -> "i386"
-  "i586"  -> "i386"
-  "i686"  -> "i386"
-  "amd64" -> "x86_64"
-  _ -> fromMaybe arch $ listToMaybe
-    [prefix | prefix <- archPrefixes, prefix `isPrefixOf` arch]
-  where archPrefixes =
-          [ "aarch64", "alpha", "arm", "hppa1_1", "hppa", "m68k", "mipseb"
-          , "mipsel", "mips", "powerpc64le", "powerpc64", "powerpc", "s390x"
-          , "sparc64", "sparc"
-          ]
-
--- | Replicate the normalization performed by GHC_CONVERT_OS in GHC's aclocal.m4
--- since the output of that is what Cabal parses.
-ghcConvertOS :: String -> String
-ghcConvertOS os = case os of
-  "watchos"       -> "ios"
-  "tvos"          -> "ios"
-  "linux-android" -> "linux-android"
-  "linux-androideabi" -> "linux-androideabi"
-  _ | "linux-" `isPrefixOf` os -> "linux"
-  _ -> fromMaybe os $ listToMaybe
-    [prefix | prefix <- osPrefixes, prefix `isPrefixOf` os]
-  where osPrefixes =
-          [ "gnu", "openbsd", "aix", "darwin", "solaris2", "freebsd", "nto-qnx"]
-
-parseArch :: String -> Arch
-parseArch = classifyArch Permissive . ghcConvertArch
-
-parseOS :: String -> OS
-parseOS = classifyOS Permissive . ghcConvertOS
-
-parsePlatform :: String -> Maybe Platform
-parsePlatform = parsePlatformParts . splitOn "-"
-
-parsePlatformParts :: [String] -> Maybe Platform
-parsePlatformParts = \case
-  [arch, os] ->
-    Just $ Platform (parseArch arch) (parseOS os)
-  (arch : _ : osParts) ->
-    Just $ Platform (parseArch arch) $ parseOS $ intercalate "-" osParts
-  _ -> Nothing
+-- TODO(@sternenseemann): add tests for this
+-- | Parse either a nixpkgs system tuple or an LLVM triple as understood by
+--   Cabal into a single 'Platform' value.
+parseSinglePlatform :: String -> Maybe Platform
+parseSinglePlatform s = platformFromNixpkgs <|> platformFromTriple s
+  where platformFromNixpkgs =
+          case nixpkgsPlatformFromString s of
+            Just (NixpkgsPlatformSingle p) -> Just p
+            _ -> Nothing
 
 pinfo :: ParserInfo Options
 pinfo = info

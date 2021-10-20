@@ -3,6 +3,7 @@
 
 module Main ( main ) where
 
+import Cabal2nix ( parseSinglePlatform )
 import HackageGit
 
 import Control.Lens
@@ -62,7 +63,7 @@ main = do
         <*> optional (strOption (long "preferred-versions" <> help "path to Hackage preferred-versions file" <> value "hackage/preferred-versions" <> showDefault <> metavar "PATH"))
         <*> strOption (long "nixpkgs" <> help "path to Nixpkgs repository" <> value "nixpkgs" <> showDefaultWith id <> metavar "PATH")
         <*> some1 (strOption (long "config" <> help "path to configuration file inside of Nixpkgs" <> metavar "PATH"))
-        <*> option (fmap fromString str) (long "platform" <> help "target platform to generate package set for" <> value "x86_64-linux" <> showDefaultWith display <> metavar "PLATFORM")
+        <*> option (maybeReader parseSinglePlatform) (long "platform" <> help "target platform to generate package set for" <> value (Platform X86_64 Linux) <> showDefaultWith display <> metavar "PLATFORM")
 
       pinfo :: ParserInfo CLI
       pinfo = info
@@ -157,7 +158,7 @@ main = do
           drv = fromGenericPackageDescription haskellResolver nixpkgsResolver targetPlatform (compilerInfo config) flagAssignment [] descr
                   & src .~ urlDerivationSource ("mirror://hackage/" ++ display pkgId ++ ".tar.gz") tarballSHA256
                   & editedCabalFile .~ cabalSHA256
-                  & metaSection.badPlatforms .~ fmap (Set.map NixpkgsPlatformSingle) (Map.lookup name (unsupportedPlatforms config))
+                  & metaSection.badPlatforms .~ (Map.lookup name (unsupportedPlatforms config))
                   & metaSection.hydraPlatforms %~ (if isHydraEnabled then id else const (Just Set.empty))
                   & metaSection.broken ||~ isBroken
                   & metaSection.maintainers .~ Map.findWithDefault Set.empty name globalPackageMaintainers
